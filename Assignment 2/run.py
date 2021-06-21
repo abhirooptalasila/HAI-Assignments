@@ -1,8 +1,12 @@
 import logger
 log = logger.setup_logger(file_name = 'app_debug.log')
 
-import unet # as unet
+from unet.models import UNet
+import torch
 
 log.debug('Calling module function.')
-log.warning(unet.add(5, 2))
+image = torch.rand((1, 1, 572, 572))
+model = UNet()
+model.forward(image)
+# log.warning()
 log.debug('Finished.')

@@ -1,1 +1,1 @@
-from .samp import *
+from .models import *
