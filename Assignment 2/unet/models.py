@@ -1,76 +1,84 @@
-import torch
 import logger
 log = logger.get_logger(__name__)
 
+import torch
 import torch.nn as nn
 
-def double_conv(in_c, out_c):
-    conv = nn.Sequential(
-        nn.Conv2d(in_c, out_c, kernel_size=3), 
-        nn.ReLU(inplace=True), 
-        nn.Conv2d(out_c, out_c, kernel_size=3), 
-        nn.ReLU(inplace=True)
-    )
-    return conv
-
-def up_trans_cov(in_c, out_c, x, cat):
-    up_trans = nn.ConvTranspose2d(
-            in_channels=in_c, out_channels=out_c, 
-            kernel_size=2, stride=2
-    )
-    up_conv = double_conv(in_c, out_c)
-
-    x1 = up_trans(x)
-    cropped = crop_tensor(cat, x1)
-    x2 = up_conv(torch.cat([cropped, x1], 1))
-    return x2
-
-def crop_tensor(tensor, target_tensor):
-    tensor_size = tensor.size()[2]
-    target_size = target_tensor.size()[2] 
-    delta = tensor_size - target_size
-    delta = delta // 2
-    return tensor[:, :, delta:tensor_size-delta, delta:tensor_size-delta]
-
-class UNet(nn.Module):
-    def __init__(self):
-        super(UNet, self).__init__()
-        self.max_pool_2x2 = nn.MaxPool2d(kernel_size=2, stride=2)
-        self.down_conv_1 = double_conv(1, 64)
-        self.down_conv_2 = double_conv(64, 128)
-        self.down_conv_3 = double_conv(128, 256)
-        self.down_conv_4 = double_conv(256, 512)
-        self.down_conv_5 = double_conv(512, 1024)
-
-        self.out = nn.Conv2d(
-            in_channels=64, out_channels=2, 
-            kernel_size=1
+class Double_conv(nn.Module):
+    def __init__(self, in_c, out_c):
+        super(Double_conv, self).__init__()
+        self.conv = nn.Sequential(
+            nn.Conv2d(in_c, out_c, 3, padding=1, stride=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_c, out_c, 3, padding=1, stride=1),
+            nn.ReLU(inplace=True)
         )
 
     def forward(self, x):
-        # (b, c, h, w)
-        # encoder part
-        log.debug("Encoder I/P Size: {}".format(x.size()))
-        x1 = self.down_conv_1(x) #1
-        x2 = self.max_pool_2x2(x1)
-        x3 = self.down_conv_2(x2) #2
-        x4 = self.max_pool_2x2(x3)
-        x5 = self.down_conv_3(x4) #3
-        x6 = self.max_pool_2x2(x5)
-        x7 = self.down_conv_4(x6) #4
-        x8 = self.max_pool_2x2(x7)
-        x9 = self.down_conv_5(x8)
-        # log.debug("Encoder O/P Size: {}".format(x9.size()))
+        x = self.conv(x)
+        return x
 
-        # decoder part
-        x10 = up_trans_cov(1024, 512, x9, x7)
-        x11 = up_trans_cov(512, 256, x10, x5)
-        x12 = up_trans_cov(256, 128, x11, x3)
-        x13 = up_trans_cov(128, 64, x12, x1)
-        output = self.out(x13)
+class Conv_down(nn.Module):
+    def __init__(self, in_c, out_c):
+        super(Conv_down, self).__init__()
+        self.conv = Double_conv(in_c, out_c)
+        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
 
-        log.debug("Decoder O/P Size: {}".format(output.size()))
-        return output
+    def forward(self, x):
+        x = self.conv(x)
+        pool_x = self.pool(x)
+        return pool_x, x
 
-    def predict(self):
-        pass
+class Conv_up(nn.Module):
+    def __init__(self, in_c, out_c):
+        super(Conv_up, self).__init__()
+        self.up = nn.ConvTranspose2d(
+            in_c, out_c, kernel_size=2, stride=2)
+        self.conv = Double_conv(in_c, out_c)
+
+    def forward(self, x1, x2):
+        x1 = self.up(x1)
+        x2 = extract_img(x1, x2)
+        x1 = torch.cat((x1, x2), dim=1)
+        x1 = self.conv(x1)
+        return x1
+
+
+def extract_img(target, in_tensor):
+    size = target.size()[2]
+    dim1, dim2 = in_tensor.size()[2:]
+    in_tensor = in_tensor[:, :, int((dim1-size)/2):int((dim1+size)/2),
+                          int((dim2-size)/2):int((dim2+size)/2)]
+    return in_tensor
+
+
+class UNet(nn.Module):
+    def __init__(self, in_c, out_c):
+        super(UNet, self).__init__()
+        self.encoder_1 = Conv_down(in_c, 64)
+        self.encoder_2 = Conv_down(64, 128)
+        self.encoder_3 = Conv_down(128, 256)
+        self.encoder_4 = Conv_down(256, 512)
+        self.encoder_5 = Conv_down(512, 1024)
+        self.decoder_1 = Conv_up(1024, 512)
+        self.decoder_2 = Conv_up(512, 256)
+        self.decoder_3 = Conv_up(256, 128)
+        self.decoder_4 = Conv_up(128, 64)
+        self.out = nn.Conv2d(64, out_c, 1)
+
+    def forward(self, x):
+        log.debug("I/P Size: {}".format(x.size()))
+        x, conv1 = self.encoder_1(x)
+        x, conv2 = self.encoder_2(x)
+        x, conv3 = self.encoder_3(x)
+        x, conv4 = self.encoder_4(x)
+        _, x = self.encoder_5(x)
+
+        x = self.decoder_1(x, conv4)
+        x = self.decoder_2(x, conv3)
+        x = self.decoder_3(x, conv2)
+        x = self.decoder_4(x, conv1)
+        x = self.out(x)
+        # x = nn.Softmax(dim=1)(x)
+        log.debug("O/P Size: {}".format(x.size()))
+        return x
