@@ -1,6 +1,7 @@
 */.ipynb_checkpoints/
-*.log
+*.log   
 *.DS_Store
 Assignment\ 2/data/
 Assignment\ 2/__pycache__/
 Assignment\ 2/*/__pycache__/
+Assignment\ 2/*/.ipynb_checkpoints/

@@ -5,7 +5,7 @@ import torch
 import numpy as np
 from unet.utils import *
 
-def train_IDBI(model, train_dl, val_dl, save_path, ds=False, epochs=500):
+def train(model, train_dl, val_dl, ds=False, epochs=500):
 	#model = UNet(1, 1)
 	device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -14,11 +14,10 @@ def train_IDBI(model, train_dl, val_dl, save_path, ds=False, epochs=500):
 		model = model.type(torch.cuda.FloatTensor)
 
 	criterion = torch.nn.BCEWithLogitsLoss()
-	optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
-	epochs = epochs
-	min_valid_loss = np.inf
+	#optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+	optimizer = torch.optim.Adam(model.parameters(), lr = 1e-3)
 	log.info("Started training for {} for {} epochs".format(
-		save_path.split("/")[-1], epochs))
+		model.__class__.__name__, epochs))
 
 	for e in range(epochs):
 		train_loss = 0.0
@@ -44,25 +43,25 @@ def train_IDBI(model, train_dl, val_dl, save_path, ds=False, epochs=500):
 			loss.backward()
 			optimizer.step()
 			
-		valid_loss = validation_IDBI(model, device, val_dl, criterion, ds)
+		valid_loss = validation(model, device, val_dl, criterion, ds)
 
 		del data, labels; torch.cuda.empty_cache()
 
 		if e % 50 == 0:
 			log.debug('Epoch {} \t Training Loss: {} \t Validation Loss: {}'.format(
 					e+1, train_loss, valid_loss))
-			validation_IDBI(model, device, val_dl, criterion, ds, True)
+			validation(model, device, val_dl, criterion, ds, True)
 
-		if min_valid_loss > valid_loss:
-			min_valid_loss = valid_loss
-			# Saving State Dict
-			torch.save({
-					'model_state_dict': model.state_dict(),
-					'optimizer_state_dict': optimizer.state_dict(),
-					}, save_path)
+		# if min_valid_loss > valid_loss:
+		# 	min_valid_loss = valid_loss
+		# 	# Saving State Dict
+		# 	torch.save({
+		# 			'model_state_dict': model.state_dict(),
+		# 			'optimizer_state_dict': optimizer.state_dict(),
+		# 			}, save_path)
 
 
-def validation_IDBI(model, device, dl, lossfn, ds, metrics=False):
+def validation(model, device, dl, lossfn, ds, metrics=False):
 	val_loss, mean_iou, mean_dice = 0.0, [], []
 	model.eval()
 	with torch.no_grad():
@@ -96,7 +95,6 @@ def validation_IDBI(model, device, dl, lossfn, ds, metrics=False):
 		return 
 
 	return val_loss
-
 
 if __name__ == "__main__":
 	pass
